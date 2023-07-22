@@ -7,10 +7,7 @@ def getRoutes(request):
     routes = [
         "/api/token",
         "/api/token/refresh",
-        "/api/users/",
-        "/api/posts/",
-        "/api/comments",
-        "/api/addgroup"
+        "/api/register",
     ]
 
     return Response(routes)

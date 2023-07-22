@@ -1,7 +1,12 @@
-from django.urls import path
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
+
+from .views import RegisterView, UserViewSet
+
+router = DefaultRouter()
+router.register(r"users", UserViewSet)
 
 urlpatterns = [
-    # path('users/', UserList.as_view()),
-    # path('posts/', PostList.as_view()),
-    # path('comments/', CommentList.as_view()),
+    path("", include(router.urls)),
+    path("register/", RegisterView.as_view(), name="register"),
 ]
