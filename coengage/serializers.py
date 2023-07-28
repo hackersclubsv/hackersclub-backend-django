@@ -1,5 +1,9 @@
+import random
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
@@ -16,6 +20,14 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
 
         return token
 
+    def validate(self, attrs):
+        data = super().validate(attrs)
+
+        if not self.user.is_verified:
+            raise serializers.ValidationError("Email is not verified")
+
+        return data
+
 
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
@@ -29,6 +41,11 @@ class UserSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data["password"] = make_password(validated_data.get("password"))
+        validated_data["otp"] = str(random.randint(100000, 999999))
+        validated_data["otp_created_at"] = timezone.now()
+        validated_data["otp_expiration"] = timezone.now() + timedelta(minutes=10)
+        validated_data["otp_attempts"] = 0
+        validated_data["otp_attempts_timestamp"] = None
         return super(UserSerializer, self).create(validated_data)
 
     class Meta:

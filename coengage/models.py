@@ -1,6 +1,5 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
-from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 
@@ -20,6 +19,12 @@ class CustomUser(AbstractUser):
     )
     role = models.PositiveSmallIntegerField(choices=ROLE_CHOICES, default=STUDENT)
     bio = models.TextField(_("about"), max_length=500, blank=True)
+    is_verified = models.BooleanField(default=False)
+    otp = models.CharField(max_length=32, blank=True, null=True)
+    otp_created_at = models.DateTimeField(blank=True, null=True)
+    otp_expiration = models.DateTimeField(blank=True, null=True)
+    otp_attempts = models.IntegerField(default=0)
+    otp_attempts_timestamp = models.DateTimeField(blank=True, null=True)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["username"]
