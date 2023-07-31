@@ -29,8 +29,14 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         return data
 
 
+class URLImageField(serializers.ImageField):
+    def to_representation(self, value):
+        return value
+
+
 class UserSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
+    profile_picture = URLImageField(use_url=True, required=False)
+    email = serializers.EmailField(read_only=True)
 
     def validate_email(self, value):
         if not value.endswith("@northeastern.edu"):
@@ -39,6 +45,18 @@ class UserSerializer(serializers.ModelSerializer):
             )
         return value
 
+    class Meta:
+        model = User
+        fields = ["username", "email", "bio", "profile_picture"]
+
+
+class RegisterSerializer(UserSerializer):
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
+
+    class Meta(UserSerializer.Meta):
+        fields = ["username", "email", "password"]
+
     def create(self, validated_data):
         validated_data["password"] = make_password(validated_data.get("password"))
         validated_data["otp"] = str(random.randint(100000, 999999))
@@ -46,8 +64,4 @@ class UserSerializer(serializers.ModelSerializer):
         validated_data["otp_expiration"] = timezone.now() + timedelta(minutes=10)
         validated_data["otp_attempts"] = 0
         validated_data["otp_attempts_timestamp"] = None
-        return super(UserSerializer, self).create(validated_data)
-
-    class Meta:
-        model = User
-        fields = ["username", "email", "password", "bio", "profile_picture"]
+        return super().create(validated_data)

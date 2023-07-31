@@ -14,8 +14,8 @@ class CustomUser(AbstractUser):
         (STUDENT, "Student"),
     )
     email = models.EmailField(unique=True)
-    profile_picture = models.ImageField(
-        upload_to="profile_pictures/", null=True, blank=True
+    profile_picture = models.URLField(
+        default="https://coengage-bucket.s3.us-west-1.amazonaws.com/default_profile_picture.png"
     )
     role = models.PositiveSmallIntegerField(choices=ROLE_CHOICES, default=STUDENT)
     bio = models.TextField(_("about"), max_length=500, blank=True)

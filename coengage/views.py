@@ -1,19 +1,22 @@
+import os
 import random
 from datetime import timedelta
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from django.contrib.auth import get_user_model
-from django.core.mail import send_mail
+from django.core.files.storage import default_storage
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import CreateAPIView
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import CustomUser
-from .serializers import UserSerializer
+from .serializers import RegisterSerializer, UserSerializer
 
 User = get_user_model()
 
@@ -51,21 +54,62 @@ def send_email_ses(username, otp, email):
         return {"success": True, "message": response["MessageId"]}
 
 
+class IsOwnerOrReadOnly(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return obj == request.user
+
+
+class IsOwnerOrAdmin(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        return obj == request.user or request.user.role == CustomUser.ADMIN
+
+
 class UserViewSet(viewsets.ModelViewSet):
     queryset = CustomUser.objects.all()
     serializer_class = UserSerializer
+    # lookup_field = 'email'
+    permission_classes = [IsOwnerOrReadOnly, IsAuthenticated]
 
     def get_permissions(self):
         if self.action == "create":
             # Allow any user (authenticated or not) to access this action
-            return [permissions.AllowAny()]
-        return [permissions.IsAuthenticated()]
+            raise PermissionDenied("This action is not allowed.")
+        if self.action == "destroy":
+            self.permission_classes = [IsOwnerOrAdmin]
+        return super(UserViewSet, self).get_permissions()
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        if "profile_picture" in request.FILES:
+            self.handle_profile_picture_upload(request, instance)
+        return Response(serializer.data)
+
+    def handle_profile_picture_upload(self, request, instance):
+        file = request.FILES["profile_picture"]
+
+        # Determine the S3 file name
+        _, file_extension = os.path.splitext(file.name)
+        s3_file_name = f"users/{instance.id}/profile_picture{file_extension}"
+
+        # Save the file to S3
+        default_storage.save(s3_file_name, file)
+
+        # Update the URL of the profile picture
+        instance.profile_picture = default_storage.url(s3_file_name)
+
+        instance.save()
 
 
 class RegisterView(CreateAPIView):
     queryset = User.objects.all()
     permission_classes = [permissions.AllowAny]
-    serializer_class = UserSerializer
+    serializer_class = RegisterSerializer
 
     def create(self, request, *args, **kwargs):
         response = super().create(request, *args, **kwargs)
