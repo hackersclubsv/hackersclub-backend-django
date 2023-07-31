@@ -38,17 +38,25 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "storages",
+    "drf_spectacular",
 ]
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "COEngage API Documentation",
+    "DESCRIPTION": "COEngage API Documentation",
+    "VERSION": "1.0.0",
+}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
-    )
+    ),
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
 # Customize Simple JWT settings (https://django-rest-framework-simplejwt.readthedocs.io/en/latest/settings.html)
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,

@@ -65,3 +65,12 @@ class RegisterSerializer(UserSerializer):
         validated_data["otp_attempts"] = 0
         validated_data["otp_attempts_timestamp"] = None
         return super().create(validated_data)
+
+
+class ResendOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class VerifyEmailSerializer(serializers.Serializer):
+    otp = serializers.IntegerField()
+    email = serializers.EmailField()

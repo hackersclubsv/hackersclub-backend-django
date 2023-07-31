@@ -13,10 +13,16 @@ from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import CustomUser
-from .serializers import RegisterSerializer, UserSerializer
+from .serializers import (
+    RegisterSerializer,
+    ResendOTPSerializer,
+    UserSerializer,
+    VerifyEmailSerializer,
+)
 
 User = get_user_model()
 
@@ -71,8 +77,13 @@ class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
     # lookup_field = 'email'
     permission_classes = [IsOwnerOrReadOnly, IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+    http_method_names = ["get", "patch", "head", "options", "delete"]
 
     def get_permissions(self):
+        if getattr(self, "swagger_fake_view", False):
+            # VIEW USED FOR SCHEMA GENERATION PURPOSES
+            return []
         if self.action == "create":
             # Allow any user (authenticated or not) to access this action
             raise PermissionDenied("This action is not allowed.")
@@ -113,7 +124,13 @@ class RegisterView(CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         response = super().create(request, *args, **kwargs)
-        user = User.objects.get(email=request.data["email"])
+        try:
+            user = User.objects.get(email=request.data["email"])
+        except User.DoesNotExist:
+            return Response(
+                {"error": "User could not be created."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         refresh = RefreshToken.for_user(user)
         email_response = send_email_ses(user.username, user.otp, user.email)
 
@@ -139,10 +156,18 @@ class RegisterView(CreateAPIView):
 
 
 class VerifyEmail(APIView):
+    serializer_class = VerifyEmailSerializer
+
     def post(self, request, *args, **kwargs):
         otp = request.data.get("otp")
         email = request.data.get("email")
-        user = CustomUser.objects.get(email=email)
+        try:
+            user = CustomUser.objects.get(email=email)
+        except CustomUser.DoesNotExist:
+            return Response(
+                {"status": "User with email: {email} not found"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Check if OTP has expired
         if timezone.now() > user.otp_expiration:
@@ -185,9 +210,17 @@ class VerifyEmail(APIView):
 
 
 class ResendOTP(APIView):
+    serializer_class = ResendOTPSerializer
+
     def post(self, request, *args, **kwargs):
         email = request.data.get("email")
-        user = CustomUser.objects.get(email=email)
+        try:
+            user = CustomUser.objects.get(email=email)
+        except CustomUser.DoesNotExist:
+            return Response(
+                {"status": "User with email: {email} not found"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if user.is_verified:
             return Response(
