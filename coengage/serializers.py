@@ -37,7 +37,7 @@ class URLImageField(serializers.ImageField):
 
 class UserSerializer(serializers.ModelSerializer):
     profile_picture = URLImageField(use_url=True, required=False)
-    email = serializers.EmailField(read_only=True, required=True)
+    email = serializers.EmailField(read_only=True)
 
     def validate_email(self, value):
         value = value.strip().lower()
