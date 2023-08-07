@@ -1,63 +1,31 @@
 import os
-import random
 from datetime import timedelta
 
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
 from django.contrib.auth import get_user_model
 from django.core.files.storage import default_storage
+from django.db import transaction
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import NotFound
 from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
-from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import CustomUser
 from .serializers import (
+    ChangePasswordSerializer,
+    PasswordResetSerializer,
     RegisterSerializer,
+    RequestPasswordResetSerializer,
     ResendOTPSerializer,
     UserSerializer,
     VerifyEmailSerializer,
 )
+from .utilities import generate_otp, send_email_ses
 
 User = get_user_model()
-
-
-def send_email_ses(username, otp, email):
-    ses = boto3.client("ses", region_name="us-west-1")
-    try:
-        response = ses.send_email(
-            Destination={
-                "ToAddresses": [email],
-            },
-            Message={
-                "Body": {
-                    "Html": {
-                        "Charset": "UTF-8",
-                        "Data": f"""
-                            <p>Hello {username},</p>
-                            <p>You requested a one-time password. Use this password to continue your process.</p>
-                            <table width='100%'><tr><td style='text-align: center; font-size: 28px; font-weight: bold;'>{otp}</td></tr></table>
-                            <p>If you didn't request this email, please ignore it.</p>
-                            <p>-- Northeastern University Silicon Valley HackersClub</p>
-                        """,
-                    },
-                },
-                "Subject": {
-                    "Charset": "UTF-8",
-                    "Data": "Your one-time password",
-                },
-            },
-            Source="vidyalathanataraja.r@northeastern.edu",
-        )
-    except (BotoCoreError, ClientError) as error:
-        return {"success": False, "message": str(error)}
-    else:
-        return {"success": True, "message": response["MessageId"]}
 
 
 class IsOwnerOrReadOnly(permissions.BasePermission):
@@ -69,14 +37,14 @@ class IsOwnerOrReadOnly(permissions.BasePermission):
 
 class IsOwnerOrAdmin(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
-        return obj == request.user or request.user.role == CustomUser.ADMIN
+        return obj == request.user or request.user.role == User.ADMIN
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = CustomUser.objects.all()
+    queryset = User.objects.all()
     serializer_class = UserSerializer
     # lookup_field = 'email'
-    permission_classes = [IsOwnerOrReadOnly, IsAuthenticated]
+    permission_classes = [IsOwnerOrReadOnly]
     authentication_classes = [JWTAuthentication]
     http_method_names = ["get", "patch", "head", "options", "delete"]
 
@@ -84,13 +52,14 @@ class UserViewSet(viewsets.ModelViewSet):
         if getattr(self, "swagger_fake_view", False):
             # VIEW USED FOR SCHEMA GENERATION PURPOSES
             return []
-        if self.action == "create":
-            # Allow any user (authenticated or not) to access this action
-            raise PermissionDenied("This action is not allowed.")
         if self.action == "destroy":
             self.permission_classes = [IsOwnerOrAdmin]
         return super(UserViewSet, self).get_permissions()
 
+    def create(self, request, *args, **kwargs):
+        raise NotFound("This method is not available.")
+
+    @transaction.atomic
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -116,14 +85,25 @@ class UserViewSet(viewsets.ModelViewSet):
 
         instance.save()
 
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response(
+            {"status": "User successfully deleted."}, status=status.HTTP_204_NO_CONTENT
+        )
+
 
 class RegisterView(CreateAPIView):
     queryset = User.objects.all()
     permission_classes = [permissions.AllowAny]
     serializer_class = RegisterSerializer
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
-        response = super().create(request, *args, **kwargs)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
         try:
             user = User.objects.get(email=request.data["email"])
         except User.DoesNotExist:
@@ -131,43 +111,31 @@ class RegisterView(CreateAPIView):
                 {"error": "User could not be created."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        refresh = RefreshToken.for_user(user)
         email_response = send_email_ses(user.username, user.otp, user.email)
 
         if not email_response["success"]:
             return Response(
-                {
-                    "refresh": str(refresh),
-                    "access": str(refresh.access_token),
-                    **response.data,
-                    "email_error": email_response["message"],
-                },
-                status=status.HTTP_200_OK,
+                {"email_error": "OTP not sent", "message": email_response["message"]},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
         return Response(
-            {
-                "refresh": str(refresh),
-                "access": str(refresh.access_token),
-                **response.data,
-            },
-            status=status.HTTP_200_OK,
+            {"status": "Registration successful. Please verify your email."},
+            status=status.HTTP_201_CREATED,
         )
 
 
 class VerifyEmail(APIView):
     serializer_class = VerifyEmailSerializer
 
+    @transaction.atomic
     def post(self, request, *args, **kwargs):
-        otp = request.data.get("otp")
-        email = request.data.get("email")
-        try:
-            user = CustomUser.objects.get(email=email)
-        except CustomUser.DoesNotExist:
-            return Response(
-                {"status": "User with email: {email} not found"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+        otp = serializer.validated_data["otp"]
+
+        user = get_object_or_404(User, email=email)
 
         # Check if OTP has expired
         if timezone.now() > user.otp_expiration:
@@ -188,13 +156,16 @@ class VerifyEmail(APIView):
         if user.is_verified:
             return Response(
                 {"status": "Email already verified, please Login"},
-                status=status.HTTP_200_OK,
+                status=status.HTTP_400_BAD_REQUEST,
             )
+
         elif otp == user.otp:
             user.is_verified = True
+            user.otp = None
             user.otp_attempts = 0
             user.otp_attempts_timestamp = None
             user.save()
+
             return Response(
                 {"status": "Email verified, please proceed to Login page"},
                 status=status.HTTP_200_OK,
@@ -212,22 +183,19 @@ class VerifyEmail(APIView):
 class ResendOTP(APIView):
     serializer_class = ResendOTPSerializer
 
+    @transaction.atomic
     def post(self, request, *args, **kwargs):
-        email = request.data.get("email")
-        try:
-            user = CustomUser.objects.get(email=email)
-        except CustomUser.DoesNotExist:
-            return Response(
-                {"status": "User with email: {email} not found"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+        user = get_object_or_404(User, email=email)
 
         if user.is_verified:
             return Response(
                 {"status": "Email already verified, please Login"},
                 status=status.HTTP_200_OK,
             )
-        user.otp = str(random.randint(100000, 999999))
+        user.otp = generate_otp()
         user.otp_created_at = timezone.now()
         user.otp_expiration = timezone.now() + timedelta(minutes=10)
         user.save()
@@ -242,4 +210,96 @@ class ResendOTP(APIView):
         return Response(
             {"status": "New OTP sent, please check your email."},
             status=status.HTTP_200_OK,
+        )
+
+
+class RequestPasswordReset(APIView):
+    serializer_class = RequestPasswordResetSerializer
+
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+        user = get_object_or_404(User, email=email)
+
+        user.otp = generate_otp()
+        user.otp_created_at = timezone.now()
+        user.otp_expiration = timezone.now() + timedelta(minutes=10)
+        user.save()
+
+        email_response = send_email_ses(user.username, user.otp, user.email)
+        if not email_response["success"]:
+            return Response(
+                {"email_error": "OTP not sent", "message": email_response["message"]},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response(
+            {"status": "OTP sent, please check your email."},
+            status=status.HTTP_200_OK,
+        )
+
+
+class PasswordReset(APIView):
+    serializer_class = PasswordResetSerializer
+
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        otp = serializer.validated_data["otp"]
+        email = serializer.validated_data["email"]
+        new_password = serializer.validated_data["password"]
+        user = get_object_or_404(User, email=email)
+
+        # Check if OTP has expired
+        if (
+            otp is not None
+            and user.otp is not None
+            and timezone.now() > user.otp_expiration
+        ):
+            return Response(
+                {"status": "OTP has expired"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if otp == user.otp:
+            user.set_password(new_password)
+            user.otp = None
+            user.otp_expiration = None
+            user.save()
+
+            return Response(
+                {"status": "Password successfully reset."},
+                status=status.HTTP_200_OK,
+            )
+        else:
+            return Response(
+                {"status": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+
+class ChangePasswordView(APIView):
+    serializer_class = ChangePasswordSerializer
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    @transaction.atomic
+    def patch(self, request, *args, **kwargs):
+        user = request.user
+        print(user.email)
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        # Check old password
+        if not user.check_password(serializer.validated_data.get("old_password")):
+            return Response(
+                {"status": "Wrong old password."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.set_password(serializer.validated_data.get("new_password"))
+        user.save()
+
+        return Response(
+            {"status": "Password updated successfully"}, status=status.HTTP_200_OK
         )

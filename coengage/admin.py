@@ -5,11 +5,24 @@ from .models import Comment, CustomUser, Group, Post, Tag
 
 
 class CustomUserAdmin(UserAdmin):
-    list_display = ("username", "id", "email", "is_staff")
+    list_display = ("username", "id", "email", "role")
     readonly_fields = ("id",)
     fieldsets = (
         ("User Info", {"fields": ("id", "username", "password")}),
-        (("Personal info"), {"fields": ("first_name", "last_name", "email", "is_verified", "bio", "profile_picture", "role")}),
+        (
+            ("Personal info"),
+            {
+                "fields": (
+                    "first_name",
+                    "last_name",
+                    "email",
+                    "is_verified",
+                    "bio",
+                    "profile_picture",
+                    "role",
+                )
+            },
+        ),
         (("Important dates"), {"fields": ("last_login", "date_joined")}),
         (
             ("Permissions"),
