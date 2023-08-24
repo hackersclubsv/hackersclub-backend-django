@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import Comment, CustomUser, Group, Post, Tag
+from .models import Category, Comment, CustomUser, Group, Image, Post, Tag, Vote
 
 
 class CustomUserAdmin(UserAdmin):
@@ -39,8 +39,33 @@ class CustomUserAdmin(UserAdmin):
     )
 
 
+class PostAdmin(admin.ModelAdmin):
+    list_display = ("title", "id", "user", "category", "number_of_images", "created_at")
+
+    def number_of_images(self, obj):
+        return obj.images.count()
+
+    number_of_images.short_description = "Number of Images"
+
+
+class ImageAdmin(admin.ModelAdmin):
+    list_display = ("url", "post", "comment")
+
+
+class CommentAdmin(admin.ModelAdmin):
+    list_display = ("content_short", "post", "user", "created_at")
+
+    def content_short(self, obj):
+        return obj.content[:50]
+
+    content_short.short_description = "Content"
+
+
 admin.site.register(CustomUser, CustomUserAdmin)
 admin.site.register(Tag)
-admin.site.register(Post)
-admin.site.register(Comment)
+admin.site.register(Post, PostAdmin)
+admin.site.register(Comment, CommentAdmin)
+admin.site.register(Image, ImageAdmin)
+admin.site.register(Vote)
 admin.site.register(Group)
+admin.site.register(Category)

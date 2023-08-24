@@ -9,51 +9,71 @@ from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.exceptions import NotFound
 from rest_framework.generics import CreateAPIView
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from .models import Category, Comment, Image, Post, Tag, Vote
 from .serializers import (
+    CategorySerializer,
     ChangePasswordSerializer,
+    CommentSerializer,
+    ImageSerializer,
     PasswordResetSerializer,
+    PostSerializer,
     RegisterSerializer,
     RequestPasswordResetSerializer,
     ResendOTPSerializer,
+    TagSerializer,
     UserSerializer,
     VerifyEmailSerializer,
+    VoteSerializer,
 )
-from .utilities import generate_otp, send_email_ses
+from .utilities import (
+    generate_otp,
+    handle_comment_image_upload,
+    handle_post_image_upload,
+    handle_user_profile_picture_upload,
+    send_email_ses,
+)
 
 User = get_user_model()
 
 
-class IsOwnerOrReadOnly(permissions.BasePermission):
+class IsUserOwnerOrReadOnly(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         if request.method in permissions.SAFE_METHODS:
             return True
         return obj == request.user
 
 
-class IsOwnerOrAdmin(permissions.BasePermission):
+class IsUserOwnerOrAdmin(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         return obj == request.user or request.user.role == User.ADMIN
+
+
+class IsPostOwnerOrAdmin(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return obj.user == request.user or request.user.role == User.ADMIN
 
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     # lookup_field = 'email'
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsUserOwnerOrReadOnly]
     authentication_classes = [JWTAuthentication]
-    http_method_names = ["get", "patch", "head", "options", "delete"]
+    http_method_names = ["get", "put", "patch", "head", "options", "delete"]
 
     def get_permissions(self):
         if getattr(self, "swagger_fake_view", False):
             # VIEW USED FOR SCHEMA GENERATION PURPOSES
             return []
         if self.action == "destroy":
-            self.permission_classes = [IsOwnerOrAdmin]
+            self.permission_classes = [IsUserOwnerOrAdmin]
         return super(UserViewSet, self).get_permissions()
 
     def create(self, request, *args, **kwargs):
@@ -67,23 +87,11 @@ class UserViewSet(viewsets.ModelViewSet):
         self.perform_update(serializer)
 
         if "profile_picture" in request.FILES:
-            self.handle_profile_picture_upload(request, instance)
+            instance.profile_picture = handle_user_profile_picture_upload(
+                instance, request.FILES["profile_picture"]
+            )
+            instance.save()
         return Response(serializer.data)
-
-    def handle_profile_picture_upload(self, request, instance):
-        file = request.FILES["profile_picture"]
-
-        # Determine the S3 file name
-        _, file_extension = os.path.splitext(file.name)
-        s3_file_name = f"users/{instance.id}/profile_picture{file_extension}"
-
-        # Save the file to S3
-        default_storage.save(s3_file_name, file)
-
-        # Update the URL of the profile picture
-        instance.profile_picture = default_storage.url(s3_file_name)
-
-        instance.save()
 
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
@@ -303,3 +311,120 @@ class ChangePasswordView(APIView):
         return Response(
             {"status": "Password updated successfully"}, status=status.HTTP_200_OK
         )
+
+
+class PostViewSet(viewsets.ModelViewSet):
+    queryset = Post.objects.all()
+    serializer_class = PostSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsPostOwnerOrAdmin]
+
+    def get_permissions(self):
+        if self.request.method not in permissions.SAFE_METHODS:
+            return [IsPostOwnerOrAdmin()]
+        return [AllowAny()]
+
+    def get_queryset(self):
+        return Post.objects.filter(is_deleted=False)
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(user=request.user)
+
+        post_instance = serializer.instance
+        print(request.data)
+        print(request.FILES)
+        if "images" in request.FILES:
+            for idx, img_file in enumerate(request.FILES.getlist("images")):
+                s3_url = handle_post_image_upload(
+                    request.user, post_instance, img_file, idx
+                )
+                Image.objects.create(url=s3_url, post=post_instance)
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            serializer.data, status=status.HTTP_201_CREATED, headers=headers
+        )
+
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(user=request.user)
+        print(request.data)
+        print(request.FILES)
+        if "images" in request.FILES:
+            for idx, img_file in enumerate(request.FILES.getlist("images")):
+                s3_url = handle_post_image_upload(request.user, instance, img_file, idx)
+                Image.objects.create(url=s3_url, post=instance)
+
+        return Response(serializer.data)
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        post = self.get_object()
+        post.is_deleted = True
+        post.save()
+        return Response(
+            {"status": "Post deleted successfully"}, status=status.HTTP_204_NO_CONTENT
+        )
+
+
+class VoteViewSet(viewsets.ModelViewSet):
+    queryset = Vote.objects.all()
+    serializer_class = VoteSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        print("called voteviewset")
+
+        user = request.user
+        post_id = self.kwargs["post_id"]
+        vote_value = request.data.get("vote")
+
+        vote, created = Vote.objects.get_or_create(
+            user=user, post_id=post_id, defaults={"vote": vote_value}
+        )
+
+        if not created:
+            if vote.vote == vote_value:
+                vote.delete()
+                return Response({"status": "Vote removed"}, status=status.HTTP_200_OK)
+            else:
+                vote.vote = vote_value
+                vote.save()
+
+        serializer = self.get_serializer(vote)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class CategoryViewSet(viewsets.ModelViewSet):
+    queryset = Category.objects.all()
+    serializer_class = CategorySerializer
+
+
+class TagViewSet(viewsets.ModelViewSet):
+    queryset = Tag.objects.all()
+    serializer_class = TagSerializer
+
+
+class CommentViewSet(viewsets.ModelViewSet):
+    queryset = Comment.objects.all()
+    serializer_class = CommentSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def perform_create(self, serializer):
+        with transaction.atomic():
+            serializer.save(user=self.request.user)
+            # Handle the image upload for the comment
+            if "image" in self.request.FILES:
+                image = self.request.FILES["image"]
+                s3_url = handle_comment_image_upload(
+                    self.request.user, serializer.instance, image
+                )
+                Image.objects.create(url=s3_url, comment=serializer.instance)

@@ -6,6 +6,8 @@ from django.utils import timezone
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+from coengage.models import Category, Comment, Image, Post, Tag, Vote
+
 from .utilities import generate_otp
 
 User = get_user_model()
@@ -49,7 +51,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["username", "email", "bio", "profile_picture"]
+        fields = ["username", "id", "email", "bio", "profile_picture"]
 
 
 class RegisterSerializer(UserSerializer):
@@ -91,3 +93,144 @@ class PasswordResetSerializer(serializers.Serializer):
 class ChangePasswordSerializer(serializers.Serializer):
     old_password = serializers.CharField(required=True)
     new_password = serializers.CharField(required=True)
+
+
+class ImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Image
+        fields = "__all__"
+
+
+class URLPostImageField(serializers.ImageField):
+    def to_representation(self, value):
+        return value.url
+
+
+class PostSerializer(serializers.ModelSerializer):
+    title = serializers.CharField(required=True)
+    content = serializers.CharField(required=True)
+    images = serializers.SerializerMethodField()
+    category_name = serializers.CharField(write_only=True, required=False)
+    input_tags = serializers.ListField(
+        child=serializers.CharField(), required=False, write_only=True
+    )
+    tags = serializers.SerializerMethodField()
+    upvotes = serializers.SerializerMethodField()
+    downvotes = serializers.SerializerMethodField()
+    user_vote = serializers.SerializerMethodField()
+
+    def get_upvotes(self, obj):
+        return Vote.objects.filter(post=obj, vote=Vote.UPVOTE).count()
+
+    def get_downvotes(self, obj):
+        return Vote.objects.filter(post=obj, vote=Vote.DOWNVOTE).count()
+
+    def get_user_vote(self, obj):
+        user = self.context["request"].user
+        if user.is_authenticated:
+            vote = Vote.objects.filter(post=obj, user=user).first()
+            return vote.vote if vote else None
+        return None
+
+    def handle_tags(self, instance, tags_data):
+        instance.tags.clear()
+        for tag_name in tags_data:
+            tag_name = self.normalize_name(tag_name)
+            tag, _ = Tag.objects.get_or_create(name=tag_name)
+            instance.tags.add(tag)
+
+    def handle_category(self, validated_data):
+        if category_name := validated_data.pop("category_name", None):
+            category_name = self.normalize_name(category_name)
+            category, _ = Category.objects.get_or_create(name=category_name)
+            validated_data["category"] = category
+
+    def create(self, validated_data):
+        tags_data = validated_data.pop("input_tags", [])
+
+        self.handle_category(validated_data)
+        post = Post.objects.create(**validated_data)
+        self.handle_tags(post, tags_data)
+
+        return post
+
+    def update(self, instance, validated_data):
+        tags_data = validated_data.pop("input_tags", [])
+
+        self.handle_category(validated_data)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        self.handle_tags(instance, tags_data)
+        return instance
+
+    def normalize_name(self, name):
+        return name.strip().lower()
+
+    def get_images(self, obj):
+        return [image.url for image in obj.images.all()]
+
+    def get_tags(self, obj):
+        return [tag.name for tag in obj.tags.all()]
+
+    class Meta:
+        model = Post
+        fields = [
+            "id",
+            "title",
+            "content",
+            "category_name",
+            "input_tags",
+            "tags",
+            "images",
+            "slug",
+            "created_at",
+            "updated_at",
+            "is_deleted",
+            "is_sticky",
+            "user",
+            "upvotes",
+            "downvotes",
+            "user_vote",
+        ]
+
+        read_only_fields = [
+            "slug",
+            "created_at",
+            "updated_at",
+            "is_deleted",
+            "is_sticky",
+            "user",
+            "images",
+            "upvotes",
+            "downvotes",
+            "user_vote",
+        ]
+
+
+class VoteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Vote
+        fields = "__all__"
+
+
+class CategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Category
+        fields = "__all__"
+
+
+class TagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tag
+        fields = "__all__"
+
+
+class CommentSerializer(serializers.ModelSerializer):
+    user = serializers.ReadOnlyField(source="user.username")
+
+    class Meta:
+        model = Comment
+        fields = "__all__"
