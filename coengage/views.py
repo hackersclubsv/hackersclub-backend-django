@@ -273,7 +273,7 @@ class PasswordReset(APIView):
                 {"status": "OTP has expired"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        if otp == user.otp:
+        if otp == int(user.otp):
             user.set_password(new_password)
             user.otp = None
             user.otp_expiration = None
