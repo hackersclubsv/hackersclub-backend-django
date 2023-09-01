@@ -6,9 +6,15 @@ from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 from django.core.files.storage import default_storage
 
+from coengage.models import Comment, Image, Post
+
 
 def generate_otp():
     return str(random.randint(100000, 999999))
+
+
+def normalize_name(name):
+    return name.strip().lower()
 
 
 def send_email_ses(username, otp, email):
@@ -61,20 +67,25 @@ def handle_user_profile_picture_upload(user, file):
     return save_file_to_s3(file, s3_path)
 
 
-def handle_post_image_upload(user, post, file, idx=None):
+def handle_image_upload(user, instance, file, idx=None):
     """
-    Handle the image upload for a post instance.
+    Handle the image upload for an instance (either Post or Comment).
     """
+    instance_type = "posts" if isinstance(instance, Post) else "comments"
     filename, file_extension = os.path.splitext(file.name)
     filename = f"{filename}{idx}" if idx else filename
-    s3_path = f"users/{user.id}/posts/{post.id}/{filename}{file_extension}"
+    s3_path = (
+        f"users/{user.id}/{instance_type}/{instance.id}/{filename}{file_extension}"
+    )
     return save_file_to_s3(file, s3_path)
 
 
-def handle_comment_image_upload(user, comment, file):
-    """
-    Handle the image upload for a comment instance.
-    """
-    _, file_extension = os.path.splitext(file.name)
-    s3_path = f"users/{user.id}/comments/{comment.id}/image{file_extension}"
-    return save_file_to_s3(file, s3_path)
+def handle_and_save_images(request, instance, field_name):
+    if field_name in request.FILES:
+        for idx, img_file in enumerate(request.FILES.getlist(field_name)):
+            s3_url = handle_image_upload(request.user, instance, img_file, idx)
+
+            if isinstance(instance, Post):
+                Image.objects.create(url=s3_url, post=instance)
+            elif isinstance(instance, Comment):
+                Image.objects.create(url=s3_url, comment=instance)

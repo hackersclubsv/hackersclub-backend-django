@@ -6,9 +6,9 @@ from django.utils import timezone
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from coengage.models import Category, Comment, Image, Post, Tag, Vote
+from coengage.models import Category, Comment, CommentVote, Image, Post, PostVote, Tag
 
-from .utilities import generate_otp
+from .utilities import generate_otp, normalize_name
 
 User = get_user_model()
 
@@ -118,32 +118,37 @@ class PostSerializer(serializers.ModelSerializer):
     upvotes = serializers.SerializerMethodField()
     downvotes = serializers.SerializerMethodField()
     user_vote = serializers.SerializerMethodField()
+    total_comments = serializers.IntegerField(read_only=True)
+    category_display = serializers.SerializerMethodField()
 
     def get_upvotes(self, obj):
-        return Vote.objects.filter(post=obj, vote=Vote.UPVOTE).count()
+        return PostVote.objects.filter(post=obj, vote=PostVote.UPVOTE).count()
 
     def get_downvotes(self, obj):
-        return Vote.objects.filter(post=obj, vote=Vote.DOWNVOTE).count()
+        return PostVote.objects.filter(post=obj, vote=PostVote.DOWNVOTE).count()
 
     def get_user_vote(self, obj):
         user = self.context["request"].user
         if user.is_authenticated:
-            vote = Vote.objects.filter(post=obj, user=user).first()
+            vote = PostVote.objects.filter(post=obj, user=user).first()
             return vote.vote if vote else None
         return None
 
     def handle_tags(self, instance, tags_data):
         instance.tags.clear()
         for tag_name in tags_data:
-            tag_name = self.normalize_name(tag_name)
+            tag_name = normalize_name(tag_name)
             tag, _ = Tag.objects.get_or_create(name=tag_name)
             instance.tags.add(tag)
 
     def handle_category(self, validated_data):
         if category_name := validated_data.pop("category_name", None):
-            category_name = self.normalize_name(category_name)
+            category_name = normalize_name(category_name)
             category, _ = Category.objects.get_or_create(name=category_name)
             validated_data["category"] = category
+
+    def get_category_display(self, obj):
+        return obj.category.name if obj.category else None
 
     def create(self, validated_data):
         tags_data = validated_data.pop("input_tags", [])
@@ -166,9 +171,6 @@ class PostSerializer(serializers.ModelSerializer):
         self.handle_tags(instance, tags_data)
         return instance
 
-    def normalize_name(self, name):
-        return name.strip().lower()
-
     def get_images(self, obj):
         return [image.url for image in obj.images.all()]
 
@@ -182,6 +184,7 @@ class PostSerializer(serializers.ModelSerializer):
             "title",
             "content",
             "category_name",
+            "category_display",
             "input_tags",
             "tags",
             "images",
@@ -194,6 +197,7 @@ class PostSerializer(serializers.ModelSerializer):
             "upvotes",
             "downvotes",
             "user_vote",
+            "total_comments",
         ]
 
         read_only_fields = [
@@ -207,12 +211,19 @@ class PostSerializer(serializers.ModelSerializer):
             "upvotes",
             "downvotes",
             "user_vote",
+            "total_comments",
         ]
 
 
-class VoteSerializer(serializers.ModelSerializer):
+class PostVoteSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Vote
+        model = PostVote
+        fields = "__all__"
+
+
+class CommentVoteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CommentVote
         fields = "__all__"
 
 
@@ -230,7 +241,51 @@ class TagSerializer(serializers.ModelSerializer):
 
 class CommentSerializer(serializers.ModelSerializer):
     user = serializers.ReadOnlyField(source="user.username")
+    images = serializers.SerializerMethodField()
+    upvotes = serializers.SerializerMethodField()
+    downvotes = serializers.SerializerMethodField()
+    user_vote = serializers.SerializerMethodField()
+
+    def get_upvotes(self, obj):
+        return CommentVote.objects.filter(comment=obj, vote=CommentVote.UPVOTE).count()
+
+    def get_downvotes(self, obj):
+        return CommentVote.objects.filter(
+            comment=obj, vote=CommentVote.DOWNVOTE
+        ).count()
+
+    def get_user_vote(self, obj):
+        user = self.context["request"].user
+        if user.is_authenticated:
+            vote = CommentVote.objects.filter(comment=obj, user=user).first()
+            return vote.vote if vote else None
+        return None
+
+    def get_images(self, obj):
+        return [image.url for image in obj.images.all()]
 
     class Meta:
         model = Comment
-        fields = "__all__"
+        fields = [
+            "id",
+            "content",
+            "user",
+            "post",
+            "parent",
+            "created_at",
+            "updated_at",
+            "is_deleted",
+            "images",
+            "upvotes",
+            "downvotes",
+            "user_vote",
+        ]
+        read_only_fields = [
+            "created_at",
+            "updated_at",
+            "user",
+            "images",
+            "upvotes",
+            "downvotes",
+            "user_vote",
+        ]

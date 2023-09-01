@@ -33,6 +33,14 @@ class CustomUser(AbstractUser):
     REQUIRED_FIELDS = ["username"]
 
 
+class TimeStampedModel(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
+
+
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True, db_index=True)
 
@@ -50,13 +58,13 @@ class Tag(models.Model):
 class Post(models.Model):
     title = models.CharField(max_length=200, blank=False, null=False)
     content = models.TextField(blank=False, null=False)
-    slug = models.SlugField(unique=True, blank=True)  
+    slug = models.SlugField(unique=True, blank=True)
     tags = models.ManyToManyField(Tag, related_name="posts")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="posts")
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True)
-    is_deleted = models.BooleanField(default=False)
+    is_deleted = models.BooleanField(default=False, db_index=True)
     is_sticky = models.BooleanField(default=False)
 
     def save(self, *args, **kwargs):
@@ -74,20 +82,6 @@ class Post(models.Model):
         return self.title
 
 
-class Vote(models.Model):
-    UPVOTE = "upvote"
-    DOWNVOTE = "downvote"
-
-    VOTE_CHOICES = [(UPVOTE, "Upvote"), (DOWNVOTE, "Downvote")]
-
-    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
-    post = models.ForeignKey(Post, on_delete=models.CASCADE)
-    vote = models.CharField(max_length=10, choices=VOTE_CHOICES)
-
-    class Meta:
-        unique_together = ("user", "post")
-
-
 class Comment(models.Model):
     content = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
@@ -95,6 +89,7 @@ class Comment(models.Model):
     user = models.ForeignKey(
         CustomUser, on_delete=models.CASCADE, related_name="comments"
     )
+    is_deleted = models.BooleanField(default=False, db_index=True)
     post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="comments")
     parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL)
 
@@ -125,3 +120,31 @@ class Group(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class PostVote(models.Model):
+    UPVOTE = "upvote"
+    DOWNVOTE = "downvote"
+
+    VOTE_CHOICES = [(UPVOTE, "Upvote"), (DOWNVOTE, "Downvote")]
+
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
+    post = models.ForeignKey(Post, on_delete=models.CASCADE)
+    vote = models.CharField(max_length=10, choices=VOTE_CHOICES)
+
+    class Meta:
+        unique_together = ("user", "post")
+
+
+class CommentVote(models.Model):
+    UPVOTE = "upvote"
+    DOWNVOTE = "downvote"
+
+    VOTE_CHOICES = [(UPVOTE, "Upvote"), (DOWNVOTE, "Downvote")]
+
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
+    comment = models.ForeignKey(Comment, on_delete=models.CASCADE)
+    vote = models.CharField(max_length=10, choices=VOTE_CHOICES)
+
+    class Meta:
+        unique_together = ("user", "comment")

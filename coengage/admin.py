@@ -1,7 +1,17 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import Category, Comment, CustomUser, Group, Image, Post, Tag, Vote
+from .models import (
+    Category,
+    Comment,
+    CommentVote,
+    CustomUser,
+    Group,
+    Image,
+    Post,
+    PostVote,
+    Tag,
+)
 
 
 class CustomUserAdmin(UserAdmin):
@@ -66,6 +76,7 @@ admin.site.register(Tag)
 admin.site.register(Post, PostAdmin)
 admin.site.register(Comment, CommentAdmin)
 admin.site.register(Image, ImageAdmin)
-admin.site.register(Vote)
+admin.site.register(PostVote)
+admin.site.register(CommentVote)
 admin.site.register(Group)
 admin.site.register(Category)

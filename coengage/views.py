@@ -4,6 +4,7 @@ from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.core.files.storage import default_storage
 from django.db import transaction
+from django.db.models import Count
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
@@ -14,26 +15,25 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from .models import Category, Comment, Image, Post, Tag, Vote
+from .models import Category, Comment, CommentVote, Image, Post, PostVote, Tag
 from .serializers import (
     CategorySerializer,
     ChangePasswordSerializer,
     CommentSerializer,
-    ImageSerializer,
+    CommentVoteSerializer,
     PasswordResetSerializer,
     PostSerializer,
+    PostVoteSerializer,
     RegisterSerializer,
     RequestPasswordResetSerializer,
     ResendOTPSerializer,
     TagSerializer,
     UserSerializer,
     VerifyEmailSerializer,
-    VoteSerializer,
 )
 from .utilities import (
     generate_otp,
-    handle_comment_image_upload,
-    handle_post_image_upload,
+    handle_and_save_images,
     handle_user_profile_picture_upload,
     send_email_ses,
 )
@@ -53,7 +53,7 @@ class IsUserOwnerOrAdmin(permissions.BasePermission):
         return obj == request.user or request.user.role == User.ADMIN
 
 
-class IsPostOwnerOrAdmin(permissions.BasePermission):
+class IsPostOrCommentOwnerOrAdmin(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         if request.method in permissions.SAFE_METHODS:
             return True
@@ -223,6 +223,7 @@ class ResendOTP(APIView):
 
 class RequestPasswordReset(APIView):
     serializer_class = RequestPasswordResetSerializer
+    permission_classes = [AllowAny]
 
     @transaction.atomic
     def post(self, request, *args, **kwargs):
@@ -251,6 +252,7 @@ class RequestPasswordReset(APIView):
 
 class PasswordReset(APIView):
     serializer_class = PasswordResetSerializer
+    permission_classes = [AllowAny]
 
     @transaction.atomic
     def post(self, request, *args, **kwargs):
@@ -317,15 +319,17 @@ class PostViewSet(viewsets.ModelViewSet):
     queryset = Post.objects.all()
     serializer_class = PostSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsPostOwnerOrAdmin]
+    permission_classes = [IsPostOrCommentOwnerOrAdmin]
 
     def get_permissions(self):
         if self.request.method not in permissions.SAFE_METHODS:
-            return [IsPostOwnerOrAdmin()]
+            return [IsPostOrCommentOwnerOrAdmin()]
         return [AllowAny()]
 
     def get_queryset(self):
-        return Post.objects.filter(is_deleted=False)
+        return Post.objects.filter(is_deleted=False).annotate(
+            total_comments=Count("comments")
+        )
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
@@ -334,14 +338,7 @@ class PostViewSet(viewsets.ModelViewSet):
         serializer.save(user=request.user)
 
         post_instance = serializer.instance
-        print(request.data)
-        print(request.FILES)
-        if "images" in request.FILES:
-            for idx, img_file in enumerate(request.FILES.getlist("images")):
-                s3_url = handle_post_image_upload(
-                    request.user, post_instance, img_file, idx
-                )
-                Image.objects.create(url=s3_url, post=post_instance)
+        handle_and_save_images(request, post_instance, "images")
 
         headers = self.get_success_headers(serializer.data)
         return Response(
@@ -354,12 +351,8 @@ class PostViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(instance, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save(user=request.user)
-        print(request.data)
-        print(request.FILES)
-        if "images" in request.FILES:
-            for idx, img_file in enumerate(request.FILES.getlist("images")):
-                s3_url = handle_post_image_upload(request.user, instance, img_file, idx)
-                Image.objects.create(url=s3_url, post=instance)
+
+        handle_and_save_images(request, instance, "images")
 
         return Response(serializer.data)
 
@@ -373,9 +366,9 @@ class PostViewSet(viewsets.ModelViewSet):
         )
 
 
-class VoteViewSet(viewsets.ModelViewSet):
-    queryset = Vote.objects.all()
-    serializer_class = VoteSerializer
+class PostVoteViewSet(viewsets.ModelViewSet):
+    queryset = PostVote.objects.all()
+    serializer_class = PostVoteSerializer
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
@@ -386,7 +379,7 @@ class VoteViewSet(viewsets.ModelViewSet):
         post_id = self.kwargs["post_id"]
         vote_value = request.data.get("vote")
 
-        vote, created = Vote.objects.get_or_create(
+        vote, created = PostVote.objects.get_or_create(
             user=user, post_id=post_id, defaults={"vote": vote_value}
         )
 
@@ -412,19 +405,77 @@ class TagViewSet(viewsets.ModelViewSet):
     serializer_class = TagSerializer
 
 
+class CommentVoteViewSet(viewsets.ModelViewSet):
+    queryset = CommentVote.objects.all()
+    serializer_class = CommentVoteSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        user = request.user
+        comment_id = self.kwargs["comment_id"]
+        vote_value = request.data.get("vote")
+
+        vote, created = CommentVote.objects.get_or_create(
+            user=user, comment_id=comment_id, defaults={"vote": vote_value}
+        )
+
+        if not created:
+            if vote.vote == vote_value:
+                vote.delete()
+                return Response({"status": "Vote removed"}, status=status.HTTP_200_OK)
+            else:
+                vote.vote = vote_value
+                vote.save()
+
+        serializer = self.get_serializer(vote)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
 class CommentViewSet(viewsets.ModelViewSet):
     queryset = Comment.objects.all()
     serializer_class = CommentSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated]
 
-    def perform_create(self, serializer):
-        with transaction.atomic():
-            serializer.save(user=self.request.user)
-            # Handle the image upload for the comment
-            if "image" in self.request.FILES:
-                image = self.request.FILES["image"]
-                s3_url = handle_comment_image_upload(
-                    self.request.user, serializer.instance, image
-                )
-                Image.objects.create(url=s3_url, comment=serializer.instance)
+    def get_permissions(self):
+        if self.request.method not in permissions.SAFE_METHODS:
+            return [IsPostOrCommentOwnerOrAdmin()]
+        return [AllowAny()]
+
+    def get_queryset(self):
+        return Comment.objects.filter(is_deleted=False)  # Fixed the queryset
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(user=request.user)
+
+        comment_instance = serializer.instance
+        handle_and_save_images(request, comment_instance, "images")
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            serializer.data, status=status.HTTP_201_CREATED, headers=headers
+        )
+
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(user=request.user)
+
+        handle_and_save_images(request, instance, "images")
+
+        return Response(serializer.data)
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        comment = self.get_object()
+        comment.is_deleted = True
+        comment.save()
+        return Response(
+            {"status": "Comment deleted successfully"},
+            status=status.HTTP_204_NO_CONTENT,
+        )

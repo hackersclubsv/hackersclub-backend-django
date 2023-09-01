@@ -4,14 +4,15 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     ChangePasswordView,
     CommentViewSet,
+    CommentVoteViewSet,
     PasswordReset,
     PostViewSet,
+    PostVoteViewSet,
     RegisterView,
     RequestPasswordReset,
     ResendOTP,
     UserViewSet,
     VerifyEmail,
-    VoteViewSet,
 )
 
 router = DefaultRouter()
@@ -32,6 +33,15 @@ urlpatterns = [
     path(
         "users/password_change/", ChangePasswordView.as_view(), name="change-password"
     ),
-    re_path(r'^posts/(?P<post_id>\d+)/vote/$', VoteViewSet.as_view({'post': 'create'}), name='post-vote'),
+    re_path(
+        r"^posts/(?P<post_id>\d+)/vote/$",
+        PostVoteViewSet.as_view({"post": "create"}),
+        name="post-vote",
+    ),
+    re_path(
+        r"^comments/(?P<comment_id>\d+)/vote/$",
+        CommentVoteViewSet.as_view({"post": "create"}),
+        name="comment-vote",
+    ),
     path("", include(router.urls)),
 ]
