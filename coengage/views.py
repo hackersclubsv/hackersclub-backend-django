@@ -327,7 +327,7 @@ class PostViewSet(viewsets.ModelViewSet):
         return [AllowAny()]
 
     def get_queryset(self):
-        return Post.objects.filter(is_deleted=False).annotate(
+        return Post.objects.filter(is_deleted=False).select_related('user').annotate(
             total_comments=Count("comments")
         )
 

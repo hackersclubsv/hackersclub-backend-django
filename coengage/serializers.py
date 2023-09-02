@@ -109,6 +109,7 @@ class URLPostImageField(serializers.ImageField):
 class PostSerializer(serializers.ModelSerializer):
     title = serializers.CharField(required=True)
     content = serializers.CharField(required=True)
+    author = serializers.CharField(source='user.username', read_only=True) # as `user` is foreign key in Post model, we need to use `source` to get the username
     images = serializers.SerializerMethodField()
     category_name = serializers.CharField(write_only=True, required=False)
     input_tags = serializers.ListField(
@@ -193,7 +194,7 @@ class PostSerializer(serializers.ModelSerializer):
             "updated_at",
             "is_deleted",
             "is_sticky",
-            "user",
+            "author",
             "upvotes",
             "downvotes",
             "user_vote",
