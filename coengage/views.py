@@ -12,6 +12,7 @@ from rest_framework.exceptions import NotFound
 from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
@@ -364,6 +365,15 @@ class PostViewSet(viewsets.ModelViewSet):
         return Response(
             {"status": "Post deleted successfully"}, status=status.HTTP_204_NO_CONTENT
         )
+
+    @action(detail=False, methods=['get'], url_path='(?P<slug>.+)', url_name='by_slug') # not by id (pk), so set detail=False
+    def get_by_slug(self, request, slug=None):
+        post = Post.objects.filter(slug=slug).first()
+        if post is None:
+            return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = self.get_serializer(post)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class PostVoteViewSet(viewsets.ModelViewSet):
