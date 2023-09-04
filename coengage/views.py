@@ -328,9 +328,14 @@ class PostViewSet(viewsets.ModelViewSet):
         return [AllowAny()]
 
     def get_queryset(self):
-        return Post.objects.filter(is_deleted=False).select_related('user').annotate(
+        queryset = Post.objects.filter(is_deleted=False).select_related('user').annotate(
             total_comments=Count("comments")
         )
+        # Get category id from query params
+        category_id = self.request.query_params.get("category_id", None)
+        if category_id is not None:
+            queryset = queryset.filter(category_id=category_id)
+        return queryset
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
