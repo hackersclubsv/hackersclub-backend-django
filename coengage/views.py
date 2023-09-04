@@ -12,6 +12,7 @@ from rest_framework.exceptions import NotFound
 from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
@@ -273,7 +274,7 @@ class PasswordReset(APIView):
                 {"status": "OTP has expired"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        if otp == user.otp:
+        if otp == int(user.otp):
             user.set_password(new_password)
             user.otp = None
             user.otp_expiration = None
@@ -327,7 +328,7 @@ class PostViewSet(viewsets.ModelViewSet):
         return [AllowAny()]
 
     def get_queryset(self):
-        return Post.objects.filter(is_deleted=False).annotate(
+        return Post.objects.filter(is_deleted=False).select_related('user').annotate(
             total_comments=Count("comments")
         )
 
@@ -364,6 +365,15 @@ class PostViewSet(viewsets.ModelViewSet):
         return Response(
             {"status": "Post deleted successfully"}, status=status.HTTP_204_NO_CONTENT
         )
+
+    @action(detail=False, methods=['get'], url_path='(?P<slug>.+)', url_name='by_slug') # not by id (pk), so set detail=False
+    def get_by_slug(self, request, slug=None):
+        post = Post.objects.filter(slug=slug).first()
+        if post is None:
+            return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = self.get_serializer(post)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class PostVoteViewSet(viewsets.ModelViewSet):
