@@ -68,7 +68,7 @@ class Post(models.Model):
     is_sticky = models.BooleanField(default=False)
 
     def save(self, *args, **kwargs):
-        original_slug = slugify(self.title)
+        original_slug = slugify(self.title)[:30] # 30 is the max length of slug field, leaving space for date
         unique_slug = original_slug
         date_str = datetime.now().strftime("%Y%m%d%H%M%S")
 
