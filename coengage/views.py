@@ -328,8 +328,10 @@ class PostViewSet(viewsets.ModelViewSet):
         return [AllowAny()]
 
     def get_queryset(self):
-        queryset = Post.objects.filter(is_deleted=False).select_related('user').annotate(
-            total_comments=Count("comments")
+        queryset = (
+            Post.objects.filter(is_deleted=False)
+            .select_related("user")
+            .annotate(total_comments=Count("comments"))
         )
         # Get category id from query params
         category_id = self.request.query_params.get("category_id", None)
@@ -371,11 +373,15 @@ class PostViewSet(viewsets.ModelViewSet):
             {"status": "Post deleted successfully"}, status=status.HTTP_204_NO_CONTENT
         )
 
-    @action(detail=False, methods=['get'], url_path='(?P<slug>.+)', url_name='by_slug') # not by id (pk), so set detail=False
+    @action(
+        detail=False, methods=["get"], url_path="(?P<slug>.+)", url_name="by_slug"
+    )  # not by id (pk), so set detail=False
     def get_by_slug(self, request, slug=None):
         post = Post.objects.filter(slug=slug).first()
         if post is None:
-            return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND
+            )
 
         serializer = self.get_serializer(post)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -494,3 +500,36 @@ class CommentViewSet(viewsets.ModelViewSet):
             {"status": "Comment deleted successfully"},
             status=status.HTTP_204_NO_CONTENT,
         )
+
+    @action(detail=False, methods=["GET"])
+    def getCommentsByPostID(self, request):
+        post_id = request.query_params.get("id", None)
+        if post_id is None:
+            return Response(
+                {"error": "No post id was provided."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        comments = Comment.objects.filter(post_id=post_id, is_deleted=False)
+        # From the docs: https://www.django-rest-framework.org/api-guide/serializers/ 
+        # There are some cases where you need to provide extra context to the serializer in addition to the object being serialized. One common case is if you're using a serializer that includes hyperlinked relations, which requires the serializer to have access to the current request so that it can properly generate fully qualified URLs.
+        serializer = CommentSerializer(
+            comments, many=True, context={"request": request}
+        )
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["GET"])
+    def getCommentsByPostSlug(self, request):
+        slug = request.query_params.get("slug", None)
+        if slug is None:
+            return Response(
+                {"error": "No slug was provided."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            post = Post.objects.get(slug=slug)
+        except Post.DoesNotExist:
+            raise Http404("Post with given slug does not exist.")
+            
+        comments = Comment.objects.filter(post=post, is_deleted=False)
+        serializer = CommentSerializer(comments, many=True, context={"request": request})
+        return Response(serializer.data)

@@ -43,5 +43,15 @@ urlpatterns = [
         CommentVoteViewSet.as_view({"post": "create"}),
         name="comment-vote",
     ),
+    re_path(
+        r"^comments/getCommentsByPostID/$",
+        CommentViewSet.as_view({"get": "getCommentsByPostID"}),
+        name="get-comments-by-post-id",
+    ),
+    re_path(
+        r"^comments/getCommentsByPostSlug/$",
+        CommentViewSet.as_view({"get": "getCommentsByPostSlug"}),
+        name="get-comments-by-post-id",
+    ),
     path("", include(router.urls)),
 ]
