@@ -18,7 +18,7 @@ class CustomUser(AbstractUser):
     )
     email = models.EmailField(unique=True)
     profile_picture = models.URLField(
-        default="https://coengage-bucket.s3.us-west-1.amazonaws.com/default_profile_picture.png"
+        default="https://hackersclub-production-user-content-us-west-1.s3.us-west-1.amazonaws.com/default_profile_picture.png"
     )
     role = models.PositiveSmallIntegerField(choices=ROLE_CHOICES, default=STUDENT)
     bio = models.TextField(_("about"), max_length=500, blank=True)
@@ -58,7 +58,7 @@ class Tag(models.Model):
 class Post(models.Model):
     title = models.CharField(max_length=200, blank=False, null=False)
     content = models.TextField(blank=False, null=False)
-    slug = models.SlugField(unique=True, blank=True)
+    slug = models.SlugField(max_length=255, unique=True, blank=True)
     tags = models.ManyToManyField(Tag, related_name="posts")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

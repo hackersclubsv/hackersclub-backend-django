@@ -84,7 +84,6 @@ def handle_and_save_images(request, instance, field_name):
     if field_name in request.FILES:
         for idx, img_file in enumerate(request.FILES.getlist(field_name)):
             s3_url = handle_image_upload(request.user, instance, img_file, idx)
-
             if isinstance(instance, Post):
                 Image.objects.create(url=s3_url, post=instance)
             elif isinstance(instance, Comment):

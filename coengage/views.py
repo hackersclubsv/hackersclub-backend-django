@@ -8,15 +8,15 @@ from django.db.models import Count
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound
 from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from .models import Category, Comment, CommentVote, Image, Post, PostVote, Tag
+from .models import Category, Comment, CommentVote, Post, PostVote, Tag
 from .serializers import (
     CategorySerializer,
     ChangePasswordSerializer,
@@ -105,7 +105,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
 class RegisterView(CreateAPIView):
     queryset = User.objects.all()
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [AllowAny]
     serializer_class = RegisterSerializer
 
     @transaction.atomic
@@ -136,6 +136,7 @@ class RegisterView(CreateAPIView):
 
 class VerifyEmail(APIView):
     serializer_class = VerifyEmailSerializer
+    permission_classes = [AllowAny]
 
     @transaction.atomic
     def post(self, request, *args, **kwargs):
@@ -168,7 +169,7 @@ class VerifyEmail(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        elif otp == user.otp:
+        elif otp == int(user.otp):
             user.is_verified = True
             user.otp = None
             user.otp_attempts = 0
@@ -191,6 +192,7 @@ class VerifyEmail(APIView):
 
 class ResendOTP(APIView):
     serializer_class = ResendOTPSerializer
+    permission_classes = [AllowAny]
 
     @transaction.atomic
     def post(self, request, *args, **kwargs):
@@ -298,7 +300,6 @@ class ChangePasswordView(APIView):
     @transaction.atomic
     def patch(self, request, *args, **kwargs):
         user = request.user
-        print(user.email)
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         # Check old password
@@ -320,7 +321,7 @@ class PostViewSet(viewsets.ModelViewSet):
     queryset = Post.objects.all()
     serializer_class = PostSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsPostOrCommentOwnerOrAdmin]
+    lookup_field = "slug"
 
     def get_permissions(self):
         if self.request.method not in permissions.SAFE_METHODS:
@@ -328,9 +329,19 @@ class PostViewSet(viewsets.ModelViewSet):
         return [AllowAny()]
 
     def get_queryset(self):
-        return Post.objects.filter(is_deleted=False).select_related('user').annotate(
-            total_comments=Count("comments")
+        return (
+            Post.objects.filter(is_deleted=False)
+            .select_related("user")
+            .annotate(total_comments=Count("comments"))
         )
+
+    def get_object(self):
+        # Overriding this method to use the slug for object lookup
+        queryset = self.get_queryset()
+        filter_kwargs = {self.lookup_field: self.kwargs["slug"]}
+        obj = get_object_or_404(queryset, **filter_kwargs)
+        self.check_object_permissions(self.request, obj)
+        return obj
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
@@ -366,15 +377,6 @@ class PostViewSet(viewsets.ModelViewSet):
             {"status": "Post deleted successfully"}, status=status.HTTP_204_NO_CONTENT
         )
 
-    @action(detail=False, methods=['get'], url_path='(?P<slug>.+)', url_name='by_slug') # not by id (pk), so set detail=False
-    def get_by_slug(self, request, slug=None):
-        post = Post.objects.filter(slug=slug).first()
-        if post is None:
-            return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        serializer = self.get_serializer(post)
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
 
 class PostVoteViewSet(viewsets.ModelViewSet):
     queryset = PostVote.objects.all()
@@ -383,8 +385,6 @@ class PostVoteViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
-        print("called voteviewset")
-
         user = request.user
         post_id = self.kwargs["post_id"]
         vote_value = request.data.get("vote")
@@ -453,7 +453,7 @@ class CommentViewSet(viewsets.ModelViewSet):
         return [AllowAny()]
 
     def get_queryset(self):
-        return Comment.objects.filter(is_deleted=False)  # Fixed the queryset
+        return Comment.objects.filter(is_deleted=False)
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
