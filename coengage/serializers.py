@@ -161,7 +161,7 @@ class PostSerializer(serializers.ModelSerializer):
         return post
 
     def update(self, instance, validated_data):
-        tags_data = validated_data.pop("input_tags", [])
+        tags_data = validated_data.pop("input_tags", None)
 
         self.handle_category(validated_data)
 
@@ -169,7 +169,8 @@ class PostSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
-        self.handle_tags(instance, tags_data)
+        if tags_data is not None:
+            self.handle_tags(instance, tags_data)
         return instance
 
     def get_images(self, obj):

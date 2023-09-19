@@ -68,14 +68,15 @@ class Post(models.Model):
     is_sticky = models.BooleanField(default=False)
 
     def save(self, *args, **kwargs):
-        original_slug = slugify(self.title)
-        unique_slug = original_slug
-        date_str = datetime.now().strftime("%Y%m%d%H%M%S")
+        if self.pk is None:
+            original_slug = slugify(self.title)
+            unique_slug = original_slug
+            date_str = datetime.now().strftime("%Y%m%d%H%M%S")
 
-        if Post.objects.filter(slug=original_slug).exists():
-            unique_slug = f"{original_slug}-{date_str}"
+            if Post.objects.filter(slug=original_slug).exists():
+                unique_slug = f"{original_slug}-{date_str}"
 
-        self.slug = unique_slug
+            self.slug = unique_slug
         super().save(*args, **kwargs)
 
     def __str__(self):
