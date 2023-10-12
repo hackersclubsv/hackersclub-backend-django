@@ -42,8 +42,8 @@ INSTALLED_APPS = [
 ]
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "COEngage API Documentation",
-    "DESCRIPTION": "COEngage API Documentation",
+    "TITLE": "SV Hackers Club API Documentation",
+    "DESCRIPTION": "SVHC API Documentation",
     "VERSION": "1.0.0",
 }
 
@@ -125,6 +125,8 @@ AWS_LOCATION = "static"
 
 WSGI_APPLICATION = "hackersclub_backend.wsgi.application"
 
+SENDGRID_API_KEY = env("SENDGRID_API_KEY")
+SENDGRID_EMAIL_SOURCE = env("SENDGRID_EMAIL_SOURCE")
 
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases

@@ -1,14 +1,11 @@
-import os
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import Count
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
-from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound
 from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -36,7 +33,7 @@ from .utilities import (
     generate_otp,
     handle_and_save_images,
     handle_user_profile_picture_upload,
-    send_email_ses,
+    send_email_sendgrid,
 )
 
 User = get_user_model()
@@ -115,16 +112,30 @@ class RegisterView(CreateAPIView):
         self.perform_create(serializer)
         try:
             user = User.objects.get(email=request.data["email"])
+
+            email_response = send_email_sendgrid(user.username, user.otp, user.email)
+            print(email_response)
+
+            if not email_response["success"]:
+                return Response(
+                    {
+                        "email_error": "OTP not sent",
+                        "message": email_response["message"],
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
         except User.DoesNotExist:
             return Response(
                 {"error": "User could not be created."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        email_response = send_email_ses(user.username, user.otp, user.email)
-
-        if not email_response["success"]:
+        except (
+            Exception
+        ) as e:  # A general catch-all for other exceptions for logging purposes
+            print(f"Error during registration: {str(e)}")
             return Response(
-                {"email_error": "OTP not sent", "message": email_response["message"]},
+                {"error": "An unexpected error occurred during registration."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -211,7 +222,8 @@ class ResendOTP(APIView):
         user.otp_expiration = timezone.now() + timedelta(minutes=10)
         user.save()
 
-        email_response = send_email_ses(user.username, user.otp, user.email)
+        # email_response = send_email_ses(user.username, user.otp, user.email)
+        email_response = send_email_sendgrid(user.username, user.otp, user.email)
         if not email_response["success"]:
             return Response(
                 {"email_error": "OTP not sent", "message": email_response["message"]},
@@ -240,7 +252,8 @@ class RequestPasswordReset(APIView):
         user.otp_expiration = timezone.now() + timedelta(minutes=10)
         user.save()
 
-        email_response = send_email_ses(user.username, user.otp, user.email)
+        # email_response = send_email_ses(user.username, user.otp, user.email)
+        email_response = send_email_sendgrid(user.username, user.otp, user.email)
         if not email_response["success"]:
             return Response(
                 {"email_error": "OTP not sent", "message": email_response["message"]},

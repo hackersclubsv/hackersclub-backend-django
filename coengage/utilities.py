@@ -5,6 +5,8 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 from django.core.files.storage import default_storage
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 
 from coengage.models import Comment, Image, Post
 
@@ -48,6 +50,29 @@ def send_email_ses(username, otp, email):
         return {"success": False, "message": str(error)}
     else:
         return {"success": True, "message": response["MessageId"]}
+
+
+def send_email_sendgrid(username, otp, email):
+    # Set up data for dynamic template
+    data = {"name": username, "otp": otp}
+
+    # Prepare the message
+    message = Mail(
+        from_email=settings.SENDGRID_EMAIL_SOURCE,
+        to_emails=email,
+    )
+    message.template_id = "d-fe0c2e98d91d4f97a40f083e6a832925"
+    message.dynamic_template_data = data
+    print(message)
+    # Send the email using SendGrid
+    try:
+        sg = SendGridAPIClient(settings.SENDGRID_API_KEY)
+        response = sg.send(message)
+        print(response)
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+    else:
+        return {"success": True, "message": "Email sent successfully"}
 
 
 def save_file_to_s3(file, s3_path):
