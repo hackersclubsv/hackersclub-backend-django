@@ -61,7 +61,7 @@ def send_email_sendgrid(username, otp, email):
         from_email=settings.SENDGRID_EMAIL_SOURCE,
         to_emails=email,
     )
-    message.template_id = "d-fe0c2e98d91d4f97a40f083e6a832925"
+    message.template_id = settings.SENDGRID_TEMPLATE_ID
     message.dynamic_template_data = data
     print(message)
     # Send the email using SendGrid
