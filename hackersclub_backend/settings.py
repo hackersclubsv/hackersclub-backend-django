@@ -129,6 +129,7 @@ WSGI_APPLICATION = "hackersclub_backend.wsgi.application"
 
 SENDGRID_API_KEY = env("SENDGRID_API_KEY")
 SENDGRID_EMAIL_SOURCE = env("SENDGRID_EMAIL_SOURCE")
+SENDGRID_TEMPLATE_ID = env("SENDGRID_TEMPLATE_ID")
 
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
