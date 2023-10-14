@@ -26,14 +26,10 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         data = super().validate(attrs)
 
+        # Change the error message structure for consistency with other error handling, easier for frontend to parse
         if not self.user.is_verified:
             raise serializers.ValidationError(
-                [
-                    {
-                        "error": "Email is not verified",
-                        "message": "Email is not verified, Please verify the email to login",
-                    }
-                ]
+                {"detail": "Email is not verified, Please verify the email to login"}
             )
 
         return data
@@ -51,8 +47,9 @@ class UserSerializer(serializers.ModelSerializer):
     def validate_email(self, value):
         value = value.strip().lower()
         if not value.endswith("@northeastern.edu"):
+            # Change the error message structure for consistency with other error handling, easier for frontend to parse
             raise serializers.ValidationError(
-                "Email must be from the northeastern.edu domain"
+                {"detail": "Email must be from the northeastern.edu domain"}
             )
         return value
 
