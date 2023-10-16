@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
+from django.db import DatabaseError
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -45,13 +46,18 @@ class UserSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(read_only=True)
 
     def validate_email(self, value):
-        value = value.strip().lower()
-        if not value.endswith("@northeastern.edu"):
-            # Change the error message structure for consistency with other error handling, easier for frontend to parse
+        try:
+            value = value.strip().lower()
+            if not value.endswith("@northeastern.edu"):
+                raise serializers.ValidationError(
+                    {"message": "Email must be from the northeastern.edu domain"}
+                )
+            return value
+        except Exception as e:
+            print(f"Error in email validation: {str(e)}")
             raise serializers.ValidationError(
-                {"detail": "Email must be from the northeastern.edu domain"}
+                {"message": "An unexpected error occurred during email validation."}
             )
-        return value
 
     class Meta:
         model = User
@@ -66,13 +72,24 @@ class RegisterSerializer(UserSerializer):
         fields = ["username", "email", "password"]
 
     def create(self, validated_data):
-        validated_data["password"] = make_password(validated_data.get("password"))
-        validated_data["otp"] = generate_otp()
-        validated_data["otp_created_at"] = timezone.now()
-        validated_data["otp_expiration"] = timezone.now() + timedelta(minutes=10)
-        validated_data["otp_attempts"] = 0
-        validated_data["otp_attempts_timestamp"] = None
-        return super().create(validated_data)
+        try:
+            validated_data["password"] = make_password(validated_data.get("password"))
+            validated_data["otp"] = generate_otp()
+            validated_data["otp_created_at"] = timezone.now()
+            validated_data["otp_expiration"] = timezone.now() + timedelta(minutes=10)
+            validated_data["otp_attempts"] = 0
+            validated_data["otp_attempts_timestamp"] = None
+            return super().create(validated_data)
+        except DatabaseError:
+            print("Database error during user registration.")
+            raise serializers.ValidationError(
+                {"message": "Database error during user registration."}
+            )
+        except Exception as e:
+            print(f"Unexpected error during user registration: {str(e)}")
+            raise serializers.ValidationError(
+                {"message": "An unexpected error occurred during registration."}
+            )
 
 
 class ResendOTPSerializer(serializers.Serializer):
@@ -127,61 +144,91 @@ class PostSerializer(serializers.ModelSerializer):
     category_display = serializers.SerializerMethodField()
 
     def get_upvotes(self, obj):
-        return PostVote.objects.filter(post=obj, vote=PostVote.UPVOTE).count()
+        try:
+            return PostVote.objects.filter(post=obj, vote=PostVote.UPVOTE).count()
+        except DatabaseError:
+            raise serializers.ValidationError({"message": "Error fetching upvotes."})
 
     def get_downvotes(self, obj):
-        return PostVote.objects.filter(post=obj, vote=PostVote.DOWNVOTE).count()
+        try:
+            return PostVote.objects.filter(post=obj, vote=PostVote.DOWNVOTE).count()
+        except DatabaseError:
+            raise serializers.ValidationError({"message": "Error fetching downvotes."})
 
     def get_user_vote(self, obj):
-        user = self.context["request"].user
-        if user.is_authenticated:
-            vote = PostVote.objects.filter(post=obj, user=user).first()
-            return vote.vote if vote else None
-        return None
+        try:
+            user = self.context["request"].user
+            if user.is_authenticated:
+                vote = PostVote.objects.filter(post=obj, user=user).first()
+                return vote.vote if vote else None
+            return None
+        except DatabaseError:
+            raise serializers.ValidationError({"message": "Error fetching user vote."})
 
     def handle_tags(self, instance, tags_data):
-        instance.tags.clear()
-        for tag_name in tags_data:
-            tag_name = normalize_name(tag_name)
-            tag, _ = Tag.objects.get_or_create(name=tag_name)
-            instance.tags.add(tag)
+        try:
+            instance.tags.clear()
+            for tag_name in tags_data:
+                tag_name = normalize_name(tag_name)
+                tag, _ = Tag.objects.get_or_create(name=tag_name)
+                instance.tags.add(tag)
+        except DatabaseError:
+            raise serializers.ValidationError({"message": "Error updating tags."})
 
     def handle_category(self, validated_data):
-        if category_name := validated_data.pop("category_name", None):
-            category_name = normalize_name(category_name)
-            category, _ = Category.objects.get_or_create(name=category_name)
-            validated_data["category"] = category
+        try:
+            if category_name := validated_data.pop("category_name", None):
+                category_name = normalize_name(category_name)
+                category, _ = Category.objects.get_or_create(name=category_name)
+                validated_data["category"] = category
+        except DatabaseError:
+            raise serializers.ValidationError({"message": "Error handling category."})
 
     def get_category_display(self, obj):
         return obj.category.name if obj.category else None
 
     def create(self, validated_data):
-        tags_data = validated_data.pop("input_tags", [])
-
-        self.handle_category(validated_data)
-        post = Post.objects.create(**validated_data)
-        self.handle_tags(post, tags_data)
-
-        return post
+        try:
+            tags_data = validated_data.pop("input_tags", [])
+            self.handle_category(validated_data)
+            post = Post.objects.create(**validated_data)
+            self.handle_tags(post, tags_data)
+            return post
+        except Exception as e:
+            print(f"Unexpected error during post creation: {str(e)}")
+            raise serializers.ValidationError(
+                {"message": "An unexpected error occurred during post creation."}
+            )
 
     def update(self, instance, validated_data):
-        tags_data = validated_data.pop("input_tags", None)
-
-        self.handle_category(validated_data)
-
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-
-        if tags_data is not None:
-            self.handle_tags(instance, tags_data)
-        return instance
+        try:
+            tags_data = validated_data.pop("input_tags", None)
+            self.handle_category(validated_data)
+            for attr, value in validated_data.items():
+                setattr(instance, attr, value)
+            instance.save()
+            if tags_data is not None:
+                self.handle_tags(instance, tags_data)
+            return instance
+        except Exception as e:
+            print(f"Unexpected error during post update: {str(e)}")
+            raise serializers.ValidationError(
+                {"message": "An unexpected error occurred during post update."}
+            )
 
     def get_images(self, obj):
-        return [image.url for image in obj.images.all()]
+        try:
+            return [image.url for image in obj.images.all()]
+        except DatabaseError:
+            raise serializers.ValidationError(
+                {"message": "Error fetching post images."}
+            )
 
     def get_tags(self, obj):
-        return [tag.name for tag in obj.tags.all()]
+        try:
+            return [tag.name for tag in obj.tags.all()]
+        except DatabaseError:
+            raise serializers.ValidationError({"message": "Error fetching post tags."})
 
     class Meta:
         model = Post
@@ -254,22 +301,36 @@ class CommentSerializer(serializers.ModelSerializer):
     post = serializers.PrimaryKeyRelatedField(read_only=True)
 
     def get_upvotes(self, obj):
-        return CommentVote.objects.filter(comment=obj, vote=CommentVote.UPVOTE).count()
+        try:
+            return CommentVote.objects.filter(
+                comment=obj, vote=CommentVote.UPVOTE
+            ).count()
+        except DatabaseError:
+            raise serializers.ValidationError({"message": "Error fetching upvotes."})
 
     def get_downvotes(self, obj):
-        return CommentVote.objects.filter(
-            comment=obj, vote=CommentVote.DOWNVOTE
-        ).count()
+        try:
+            return CommentVote.objects.filter(
+                comment=obj, vote=CommentVote.DOWNVOTE
+            ).count()
+        except DatabaseError:
+            raise serializers.ValidationError({"message": "Error fetching downvotes."})
 
     def get_user_vote(self, obj):
-        user = self.context["request"].user
-        if user.is_authenticated:
-            vote = CommentVote.objects.filter(comment=obj, user=user).first()
-            return vote.vote if vote else None
-        return None
+        try:
+            user = self.context["request"].user
+            if user.is_authenticated:
+                vote = CommentVote.objects.filter(comment=obj, user=user).first()
+                return vote.vote if vote else None
+            return None
+        except DatabaseError:
+            raise serializers.ValidationError({"message": "Error fetching user vote."})
 
     def get_images(self, obj):
-        return [image.url for image in obj.images.all()]
+        try:
+            return [image.url for image in obj.images.all()]
+        except DatabaseError:
+            raise serializers.ValidationError({"message": "Error fetching images."})
 
     class Meta:
         model = Comment
