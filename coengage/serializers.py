@@ -251,6 +251,7 @@ class CommentSerializer(serializers.ModelSerializer):
     upvotes = serializers.SerializerMethodField()
     downvotes = serializers.SerializerMethodField()
     user_vote = serializers.SerializerMethodField()
+    post = serializers.PrimaryKeyRelatedField(read_only=True)
 
     def get_upvotes(self, obj):
         return CommentVote.objects.filter(comment=obj, vote=CommentVote.UPVOTE).count()
@@ -278,6 +279,7 @@ class CommentSerializer(serializers.ModelSerializer):
             "user",
             "post",
             "parent",
+            "slug",
             "created_at",
             "updated_at",
             "is_deleted",
@@ -290,6 +292,7 @@ class CommentSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "user",
+            "slug",
             "images",
             "upvotes",
             "downvotes",

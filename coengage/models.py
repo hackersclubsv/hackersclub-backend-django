@@ -32,6 +32,11 @@ class CustomUser(AbstractUser):
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["username"]
 
+    def save(self, *args, **kwargs):
+        # Convert username to lowercase and remove spaces
+        self.username = self.username.lower().replace(" ", "_")
+        super(CustomUser, self).save(*args, **kwargs)
+
 
 class TimeStampedModel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
@@ -68,16 +73,27 @@ class Post(models.Model):
     is_sticky = models.BooleanField(default=False)
 
     def save(self, *args, **kwargs):
-        if self.pk is None:
+        if not self.pk or self.title_changed():
             original_slug = slugify(self.title)
             unique_slug = original_slug
-            date_str = datetime.now().strftime("%Y%m%d%H%M%S")
 
-            if Post.objects.filter(slug=original_slug).exists():
+            # Check if a post with the original slug exists
+            post_with_original_slug = Post.objects.filter(slug=original_slug).first()
+
+            # If the post exists and it's not the current instance, append datetime
+            if post_with_original_slug and post_with_original_slug.pk != self.pk:
+                date_str = datetime.now().strftime("%Y%m%d%H%M%S")
                 unique_slug = f"{original_slug}-{date_str}"
 
             self.slug = unique_slug
         super().save(*args, **kwargs)
+
+    def title_changed(self):
+        try:
+            orig = Post.objects.get(pk=self.pk)
+            return orig.title != self.title
+        except Post.DoesNotExist:
+            return False
 
     def __str__(self):
         return self.title
@@ -93,6 +109,32 @@ class Comment(models.Model):
     is_deleted = models.BooleanField(default=False, db_index=True)
     post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="comments")
     parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL)
+    slug = models.SlugField(max_length=255, unique=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        if not self.slug or self.content_changed():
+            original_slug = slugify(self.content[:50])
+            unique_slug = original_slug
+
+            # Check if a comment with the original slug exists
+            comment_with_original_slug = Comment.objects.filter(
+                slug=original_slug
+            ).first()
+
+            # If the comment exists and it's not the current instance, append datetime
+            if comment_with_original_slug and comment_with_original_slug.pk != self.pk:
+                date_str = datetime.now().strftime("%Y%m%d%H%M%S")
+                unique_slug = f"{original_slug}-{date_str}"
+
+            self.slug = unique_slug
+        super().save(*args, **kwargs)
+
+    def content_changed(self):
+        try:
+            orig = Comment.objects.get(pk=self.pk)
+            return orig.content != self.content
+        except Comment.DoesNotExist:
+            return False
 
     def __str__(self):
         return self.content[:20]
