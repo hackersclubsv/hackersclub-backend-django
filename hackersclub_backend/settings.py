@@ -1,4 +1,5 @@
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
 
@@ -108,12 +109,15 @@ TEMPLATES = [
     },
 ]
 
-EMAIL_BACKEND = "django_ses.SESBackend"
+# Email configs
+EMAIL_BACKEND = "sendgrid_backend.SendgridBackend"
+SENDGRID_API_KEY = env("SENDGRID_API_KEY")
+SENDGRID_EMAIL_SOURCE = env("SENDGRID_EMAIL_SOURCE")
+SENDGRID_TEMPLATE_ID = env("SENDGRID_TEMPLATE_ID")
+
+# AWS configs
 AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY")
-AWS_SES_REGION_NAME = env("AWS_SES_REGION_NAME")
-AWS_SES_REGION_ENDPOINT = env("AWS_SES_REGION_ENDPOINT")
-AWS_SES_EMAIL_SOURCE = env("AWS_SES_EMAIL_SOURCE")
 
 AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME")
 AWS_DEFAULT_ACL = None
@@ -127,9 +131,6 @@ AWS_LOCATION = "static"
 
 WSGI_APPLICATION = "hackersclub_backend.wsgi.application"
 
-SENDGRID_API_KEY = env("SENDGRID_API_KEY")
-SENDGRID_EMAIL_SOURCE = env("SENDGRID_EMAIL_SOURCE")
-SENDGRID_TEMPLATE_ID = env("SENDGRID_TEMPLATE_ID")
 
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
@@ -137,6 +138,9 @@ SENDGRID_TEMPLATE_ID = env("SENDGRID_TEMPLATE_ID")
 DATABASES = {
     "default": env.db(),
 }
+
+if "test" in sys.argv:
+    DATABASES["default"] = env.db("TEST_DATABASE_URL")
 
 STORAGES = {
     "default": {"BACKEND": "storages.backends.s3boto3.S3Boto3Storage"},

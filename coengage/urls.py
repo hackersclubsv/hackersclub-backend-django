@@ -16,9 +16,8 @@ from .views import (
 )
 
 router = DefaultRouter()
-router.register(r"users", UserViewSet)
-router.register(r"posts", PostViewSet)
-router.register(r"comments", CommentViewSet)
+router.register(r"users", UserViewSet, basename="users")
+router.register(r"posts", PostViewSet, basename="posts")
 
 urlpatterns = [
     path("register/", RegisterView.as_view(), name="register"),
@@ -34,12 +33,29 @@ urlpatterns = [
         "users/password_change/", ChangePasswordView.as_view(), name="change-password"
     ),
     re_path(
-        r"^posts/(?P<post_id>\d+)/vote/$",
+        r"^posts/(?P<post_slug>[-\w]+)/comments/$",
+        CommentViewSet.as_view({"get": "list", "post": "create"}),
+        name="post-comments-list-create",
+    ),
+    re_path(
+        r"^posts/(?P<post_slug>[-\w]+)/comments/(?P<slug>[-\w]+)/$",
+        CommentViewSet.as_view(
+            {
+                "get": "retrieve",
+                "put": "update",
+                "patch": "partial_update",
+                "delete": "destroy",
+            }
+        ),
+        name="post-comments-detail",
+    ),
+    re_path(
+        r"^posts/(?P<post_slug>[-\w]+)/vote/$",
         PostVoteViewSet.as_view({"post": "create"}),
         name="post-vote",
     ),
     re_path(
-        r"^comments/(?P<comment_id>\d+)/vote/$",
+        r"^posts/(?P<post_slug>[-\w]+)/comments/(?P<comment_slug>[-\w]+)/vote/$",
         CommentVoteViewSet.as_view({"post": "create"}),
         name="comment-vote",
     ),

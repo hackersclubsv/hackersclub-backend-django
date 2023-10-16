@@ -1,12 +1,12 @@
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.db.models import Count
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -61,7 +61,7 @@ class IsPostOrCommentOwnerOrAdmin(permissions.BasePermission):
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    # lookup_field = 'email'
+    lookup_field = "username"
     permission_classes = [IsUserOwnerOrReadOnly]
     authentication_classes = [JWTAuthentication]
     http_method_names = ["get", "put", "patch", "head", "options", "delete"]
@@ -79,25 +79,37 @@ class UserViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def update(self, request, *args, **kwargs):
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
+        try:
+            instance = self.get_object()
+            serializer = self.get_serializer(instance, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
 
-        if "profile_picture" in request.FILES:
-            instance.profile_picture = handle_user_profile_picture_upload(
-                instance, request.FILES["profile_picture"]
-            )
-            instance.save()
-        return Response(serializer.data)
+            if "profile_picture" in request.FILES:
+                instance.profile_picture = handle_user_profile_picture_upload(
+                    instance, request.FILES["profile_picture"]
+                )
+                instance.save()
+            return Response(serializer.data)
+        except DatabaseError:
+            return Response({"error": "Database error occurred"}, status=500)
+        except ValidationError as e:  
+            return Response({"error": str(e)}, status=400)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
 
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-        self.perform_destroy(instance)
-        return Response(
-            {"status": "User successfully deleted."}, status=status.HTTP_204_NO_CONTENT
-        )
+        try:
+            instance = self.get_object()
+            self.perform_destroy(instance)
+            return Response(
+                {"status": "User successfully deleted."}, status=status.HTTP_204_NO_CONTENT
+            )
+        except DatabaseError:
+            return Response({"error": "Database error occurred"}, status=500)
+        except Exception as e:  
+            return Response({"error": str(e)}, status=500)
 
 
 class RegisterView(CreateAPIView):
@@ -107,6 +119,12 @@ class RegisterView(CreateAPIView):
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
+        if User.objects.filter(email=request.data["email"]).exists():
+            return Response(
+                {"error": "User with this email already exists."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
@@ -119,10 +137,10 @@ class RegisterView(CreateAPIView):
             if not email_response["success"]:
                 return Response(
                     {
-                        "email_error": "OTP not sent",
+                        "error": "OTP not sent",
                         "message": email_response["message"],
                     },
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
                 )
 
         except User.DoesNotExist:
@@ -132,7 +150,7 @@ class RegisterView(CreateAPIView):
             )
         except (
             Exception
-        ) as e:  # A general catch-all for other exceptions for logging purposes
+        ) as e: 
             print(f"Error during registration: {str(e)}")
             return Response(
                 {"error": "An unexpected error occurred during registration."},
@@ -222,11 +240,10 @@ class ResendOTP(APIView):
         user.otp_expiration = timezone.now() + timedelta(minutes=10)
         user.save()
 
-        # email_response = send_email_ses(user.username, user.otp, user.email)
         email_response = send_email_sendgrid(user.username, user.otp, user.email)
         if not email_response["success"]:
             return Response(
-                {"email_error": "OTP not sent", "message": email_response["message"]},
+                {"error": "OTP not sent", "message": email_response["message"]},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -252,11 +269,10 @@ class RequestPasswordReset(APIView):
         user.otp_expiration = timezone.now() + timedelta(minutes=10)
         user.save()
 
-        # email_response = send_email_ses(user.username, user.otp, user.email)
         email_response = send_email_sendgrid(user.username, user.otp, user.email)
         if not email_response["success"]:
             return Response(
-                {"email_error": "OTP not sent", "message": email_response["message"]},
+                {"error": "OTP not sent", "message": email_response["message"]},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -404,11 +420,13 @@ class PostVoteViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         user = request.user
-        post_id = self.kwargs["post_id"]
+        post_slug = self.kwargs["post_slug"]
         vote_value = request.data.get("vote")
 
+        post = get_object_or_404(Post, slug=post_slug)
+
         vote, created = PostVote.objects.get_or_create(
-            user=user, post_id=post_id, defaults={"vote": vote_value}
+            user=user, post=post, defaults={"vote": vote_value}
         )
 
         if not created:
@@ -441,11 +459,13 @@ class CommentVoteViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         user = request.user
-        comment_id = self.kwargs["comment_id"]
+        comment_slug = self.kwargs["comment_slug"]
         vote_value = request.data.get("vote")
 
+        comment = get_object_or_404(Comment, slug=comment_slug)
+
         vote, created = CommentVote.objects.get_or_create(
-            user=user, comment_id=comment_id, defaults={"vote": vote_value}
+            user=user, comment=comment, defaults={"vote": vote_value}
         )
 
         if not created:
@@ -464,20 +484,36 @@ class CommentViewSet(viewsets.ModelViewSet):
     queryset = Comment.objects.all()
     serializer_class = CommentSerializer
     authentication_classes = [JWTAuthentication]
+    lookup_field = "slug"
+
+    def get_queryset(self):
+        post_slug = self.kwargs.get("post_slug")
+        if post_slug:
+            post = get_object_or_404(Post, slug=post_slug)
+            return Comment.objects.filter(post=post, is_deleted=False)
+        return Comment.objects.filter(is_deleted=False)
+
+    def get_object(self):
+        queryset = self.get_queryset()
+        filter_kwargs = {self.lookup_field: self.kwargs["slug"]}
+        obj = get_object_or_404(queryset, **filter_kwargs)
+        self.check_object_permissions(self.request, obj)
+        return obj
 
     def get_permissions(self):
         if self.request.method not in permissions.SAFE_METHODS:
             return [IsPostOrCommentOwnerOrAdmin()]
         return [AllowAny()]
 
-    def get_queryset(self):
-        return Comment.objects.filter(is_deleted=False)
-
+    @transaction.atomic
     @transaction.atomic
     def create(self, request, *args, **kwargs):
+        post_slug = self.kwargs.get("post_slug")
+        post = get_object_or_404(Post, slug=post_slug)
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save(user=request.user)
+        serializer.save(user=request.user, post=post)
 
         comment_instance = serializer.instance
         handle_and_save_images(request, comment_instance, "images")

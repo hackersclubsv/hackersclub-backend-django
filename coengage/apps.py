@@ -2,5 +2,5 @@ from django.apps import AppConfig
 
 
 class CoengageConfig(AppConfig):
-    default_auto_field = 'django.db.models.BigAutoField'
-    name = 'coengage'
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "coengage"
