@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from django.contrib.auth.models import AbstractUser
-from django.db import models
+from django.db import DatabaseError, models
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
@@ -86,7 +86,12 @@ class Post(models.Model):
                 unique_slug = f"{original_slug}-{date_str}"
 
             self.slug = unique_slug
-        super().save(*args, **kwargs)
+        try:
+            super().save(*args, **kwargs)
+        except DatabaseError:
+            print("Database error encountered while saving the Post.")
+        except Exception as e:
+            print(f"Unexpected error occurred while saving the Post.: {str(e)}")
 
     def title_changed(self):
         try:
@@ -127,7 +132,12 @@ class Comment(models.Model):
                 unique_slug = f"{original_slug}-{date_str}"
 
             self.slug = unique_slug
-        super().save(*args, **kwargs)
+        try:
+            super().save(*args, **kwargs)
+        except DatabaseError:
+            print("Database error encountered while saving the Comment.")
+        except Exception as e:
+            print(f"Unexpected error occurred while saving the Comment.: {str(e)}")
 
     def content_changed(self):
         try:
