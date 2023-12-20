@@ -451,6 +451,7 @@ class PostViewSet(viewsets.ModelViewSet):
         try:
             queryset = (
                 Post.objects.filter(is_deleted=False)
+                .order_by("-created_at")
                 .select_related("user")
                 .annotate(total_comments=Count("comments"))
             )
