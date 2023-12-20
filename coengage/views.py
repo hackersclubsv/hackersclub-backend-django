@@ -442,6 +442,7 @@ class PostViewSet(viewsets.ModelViewSet):
     lookup_field = "slug"
 
     def get_permissions(self):
+        # SAFE_METHODS = GET, OPTIONS, HEAD
         if self.request.method not in permissions.SAFE_METHODS:
             return [IsPostOrCommentOwnerOrAdmin()]
         return [AllowAny()]
