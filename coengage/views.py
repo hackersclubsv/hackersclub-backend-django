@@ -442,6 +442,7 @@ class PostViewSet(viewsets.ModelViewSet):
     lookup_field = "slug"
 
     def get_permissions(self):
+        # SAFE_METHODS = GET, OPTIONS, HEAD
         if self.request.method not in permissions.SAFE_METHODS:
             return [IsPostOrCommentOwnerOrAdmin()]
         return [AllowAny()]
@@ -450,6 +451,7 @@ class PostViewSet(viewsets.ModelViewSet):
         try:
             queryset = (
                 Post.objects.filter(is_deleted=False)
+                .order_by("-created_at")
                 .select_related("user")
                 .annotate(total_comments=Count("comments"))
             )

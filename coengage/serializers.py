@@ -178,7 +178,6 @@ class PostSerializer(serializers.ModelSerializer):
     def handle_category(self, validated_data):
         try:
             if category_name := validated_data.pop("category_name", None):
-                category_name = normalize_name(category_name)
                 category, _ = Category.objects.get_or_create(name=category_name)
                 validated_data["category"] = category
         except DatabaseError:

@@ -163,3 +163,5 @@ cython_debug/
 .vscode/
 # Add test file (populate data)
 populate.py 
+# pyright configurations
+pyrightconfig.json
